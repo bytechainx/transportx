@@ -163,8 +163,9 @@ impl<T> HttpClientPool<T> {
     #[allow(clippy::panic)]
     pub fn new(config: PoolConfig) -> Self {
         config.validate().unwrap_or_else(|error| {
-            // PANIC: 兼容构造器无法返回 Result；无效池配置违反构造期不变量。
-            // 新代码应使用 try_new，在输入边界显式传播校验错误。
+            // 兼容构造器签名无法返回 Result，且无效池配置违反构造期不变量；
+            // 需可恢复错误的调用方应改用 try_new，在输入边界显式传播校验错误。
+            // PANIC: 输入边界 fail-fast，无安全兜底值可退回。
             panic!("HttpClientPool::new 收到无效配置: {error}");
         });
         Self::new_unchecked(config)

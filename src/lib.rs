@@ -1,15 +1,3 @@
-#![cfg_attr(
-    test,
-    allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::unreachable
-    )
-)]
-#![deny(missing_docs)]
-#![deny(unreachable_pub)]
-
 //! # transportx — 统一网络客户端抽象
 //!
 //! 提供驱动无关的 HTTP / WebSocket 传输边界，以及基于 `reqwest` / `tokio-tungstenite`
@@ -59,70 +47,38 @@
 //! # }
 //! ```
 
+#![forbid(unsafe_code)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable
+    )
+)]
+#![deny(missing_docs)]
+#![deny(unreachable_pub)]
+
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use reqwest::{Client, Method};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
-use tokio::net::TcpStream;
-use tokio_tungstenite::{
-    connect_async_with_config,
-    tungstenite::{protocol::WebSocketConfig, Message},
-    MaybeTlsStream, WebSocketStream,
-};
 
+mod error;
 mod pool;
 mod proxy;
 mod tls;
+mod ws;
+
+pub use error::TransportError;
 pub use pool::{HttpClientLease, HttpClientPool, PoolConfig, SharedHttpClientPool};
 pub use proxy::{build_reqwest_proxy, ProxyConfig};
 pub use tls::{TlsConfig, TlsMode};
-
-// ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
-/// Transport failures retain enough semantics for reconnect policy decisions.
-#[derive(Debug, thiserror::Error)]
-pub enum TransportError {
-    /// TCP / TLS 握手超时。
-    #[error("connect timeout")]
-    ConnectTimeout,
-    /// 读响应 / 帧超时。
-    #[error("read timeout")]
-    ReadTimeout,
-    /// 连接已关闭；`clean` 表示是否为协议层正常关闭。
-    #[error("connection closed ({clean})")]
-    ConnectionClosed {
-        /// `true` 表示对端/本端已完成协议关闭握手。
-        clean: bool,
-    },
-    /// HTTP 429；可选 RFC 9110 `Retry-After`（整数秒或 HTTP-date）。
-    #[error("rate limited{retry_after:?}")]
-    RateLimited {
-        /// 建议等待时长（来自 delay-seconds 或相对当前时间的 HTTP-date）。
-        retry_after: Option<Duration>,
-    },
-    /// 请求/响应/帧超过资源上限（fail-closed）。
-    #[error("载荷过大: {kind} 上限 {limit} 字节，实际 {got} 字节")]
-    PayloadTooLarge {
-        /// 资源类别（request_body / response_body / ws_frame / ws_message）。
-        kind: &'static str,
-        /// 配置上限（字节）。
-        limit: usize,
-        /// 实际大小（字节）。
-        got: usize,
-    },
-    /// 协议 / 方法 / URL 等不可恢复语义错误。
-    #[error("protocol violation: {0}")]
-    ProtocolViolation(String),
-    /// 底层 I/O 或客户端构建失败。
-    #[error("I/O error: {0}")]
-    Io(#[source] Box<dyn std::error::Error + Send + Sync>),
-}
+pub use ws::TungsteniteWsConnector;
 
 // ---------------------------------------------------------------------------
 // HTTP boundary
@@ -553,154 +509,6 @@ impl HttpDriver for ReqwestHttpDriver {
 }
 
 // ---------------------------------------------------------------------------
-// Tungstenite WebSocket driver
-// ---------------------------------------------------------------------------
-
-/// tokio-tungstenite-backed WebSocket connector. Driver-specific stream types
-/// stay private behind [`WsConnection`].
-///
-/// 默认：连接超时 30s、单帧上限 4 MiB。
-#[derive(Debug, Clone, Copy)]
-pub struct TungsteniteWsConnector {
-    connect_timeout: Duration,
-    max_frame_bytes: usize,
-}
-
-impl Default for TungsteniteWsConnector {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TungsteniteWsConnector {
-    /// 创建默认连接器（连接超时 + 帧上限见 `DEFAULT_WS_*`）。
-    pub const fn new() -> Self {
-        Self {
-            connect_timeout: DEFAULT_WS_CONNECT_TIMEOUT,
-            max_frame_bytes: DEFAULT_MAX_WS_FRAME_BYTES,
-        }
-    }
-
-    /// 自定义连接超时与单帧上限；`max_frame_bytes == 0` 关闭帧上限。
-    pub const fn with_limits(connect_timeout: Duration, max_frame_bytes: usize) -> Self {
-        Self {
-            connect_timeout,
-            max_frame_bytes,
-        }
-    }
-}
-
-type TungsteniteStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-struct TungsteniteWsConnection {
-    stream: TungsteniteStream,
-    max_frame_bytes: usize,
-}
-
-/// 将 tungstenite 错误映射为 [`TransportError`]。
-pub(crate) fn map_tungstenite_error(
-    error: tokio_tungstenite::tungstenite::Error,
-) -> TransportError {
-    use tokio_tungstenite::tungstenite::Error;
-    match error {
-        Error::ConnectionClosed | Error::AlreadyClosed => {
-            TransportError::ConnectionClosed { clean: true }
-        }
-        Error::Io(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::UnexpectedEof
-                    | std::io::ErrorKind::ConnectionReset
-                    | std::io::ErrorKind::ConnectionAborted
-                    | std::io::ErrorKind::BrokenPipe
-            ) =>
-        {
-            TransportError::ConnectionClosed { clean: false }
-        }
-        Error::Io(error) => TransportError::Io(Box::new(error)),
-        Error::Protocol(
-            tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
-        ) => TransportError::ConnectionClosed { clean: false },
-        Error::Protocol(error) => TransportError::ProtocolViolation(error.to_string()),
-        Error::Url(error) => TransportError::ProtocolViolation(error.to_string()),
-        Error::Capacity(tokio_tungstenite::tungstenite::error::CapacityError::MessageTooLong {
-            size,
-            max_size,
-        }) => TransportError::PayloadTooLarge {
-            kind: "ws_message",
-            limit: max_size,
-            got: size,
-        },
-        other => TransportError::ProtocolViolation(other.to_string()),
-    }
-}
-
-fn enforce_frame_limit(max_frame_bytes: usize, payload: Bytes) -> Result<Bytes, TransportError> {
-    if max_frame_bytes > 0 && payload.len() > max_frame_bytes {
-        return Err(TransportError::PayloadTooLarge {
-            kind: "ws_frame",
-            limit: max_frame_bytes,
-            got: payload.len(),
-        });
-    }
-    Ok(payload)
-}
-
-#[async_trait]
-impl WsConnector for TungsteniteWsConnector {
-    async fn connect(&self, url: &str) -> Result<Box<dyn WsConnection>, TransportError> {
-        let inbound_limit = (self.max_frame_bytes > 0).then_some(self.max_frame_bytes);
-        let config = WebSocketConfig::default()
-            .max_frame_size(inbound_limit)
-            .max_message_size(inbound_limit);
-        let fut = connect_async_with_config(url, Some(config), false);
-        let (stream, _) = tokio::time::timeout(self.connect_timeout, fut)
-            .await
-            .map_err(|_| TransportError::ConnectTimeout)?
-            .map_err(map_tungstenite_error)?;
-        Ok(Box::new(TungsteniteWsConnection {
-            stream,
-            max_frame_bytes: self.max_frame_bytes,
-        }))
-    }
-}
-
-#[async_trait]
-impl WsConnection for TungsteniteWsConnection {
-    async fn next_frame(&mut self) -> Result<Option<Bytes>, TransportError> {
-        while let Some(message) = self.stream.next().await {
-            match message.map_err(map_tungstenite_error)? {
-                Message::Text(text) => {
-                    let bytes = Bytes::copy_from_slice(text.as_bytes());
-                    return Ok(Some(enforce_frame_limit(self.max_frame_bytes, bytes)?));
-                }
-                Message::Binary(bytes) => {
-                    return Ok(Some(enforce_frame_limit(self.max_frame_bytes, bytes)?));
-                }
-                Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
-                Message::Close(_) => return Ok(None),
-            }
-        }
-        Err(TransportError::ConnectionClosed { clean: false })
-    }
-
-    async fn send_frame(&mut self, frame: Bytes) -> Result<(), TransportError> {
-        let frame = enforce_frame_limit(self.max_frame_bytes, frame)?;
-        self.stream
-            .send(Message::Binary(frame))
-            .await
-            .map_err(map_tungstenite_error)
-    }
-
-    async fn close(&mut self) -> Result<(), TransportError> {
-        self.stream
-            .send(Message::Close(None))
-            .await
-            .map_err(map_tungstenite_error)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // 内存 Mock
 // ---------------------------------------------------------------------------
 
@@ -777,6 +585,7 @@ impl HttpDriver for MockHttpTransport {
 #[cfg(test)]
 mod builder_tests {
     use super::*;
+    use crate::ws::map_tungstenite_error;
     use std::io::Write;
 
     #[test]
