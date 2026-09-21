@@ -7,7 +7,7 @@ description = "驱动无关的 HTTP/WebSocket 传输边界：TLS 模式、客户
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bytechainx/transportx"
 homepage = "https://github.com/bytechainx/transportx"
-documentation = "https://docs.rs/transportx"
+documentation = "https://github.com/bytechainx/transportx#readme"
 readme = "README.md"
 keywords = ["http", "websocket", "tls", "reqwest", "transport"]
 categories = ["network-programming", "web-programming::http-client", "asynchronous"]
@@ -65,6 +65,3 @@ panic = "deny"
 unreachable = "deny"
 todo = "deny"
 unimplemented = "deny"
-
-[package.metadata.docs.rs]
-rustdoc-args = ["--cfg", "docsrs"]

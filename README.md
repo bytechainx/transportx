@@ -12,8 +12,11 @@
 
 ## 安装
 
-```bash
-cargo add transportx
+本 crate **不发布到 crates.io**，通过 git 依赖引入：
+
+```toml
+[dependencies]
+transportx = { git = "https://github.com/bytechainx/transportx" }
 ```
 
 ## 最小可运行示例
