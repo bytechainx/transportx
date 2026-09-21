@@ -225,6 +225,16 @@ impl fmt::Debug for RedactedHeaders<'_> {
 }
 
 /// 判断 header 名是否敏感（Authorization / Cookie / *token* / *secret* / *api-key* 等）。
+///
+/// # Examples
+///
+/// ```
+/// use transportx::is_sensitive_header_name;
+///
+/// assert!(is_sensitive_header_name("Authorization"));
+/// assert!(is_sensitive_header_name("X-Auth-Token"), "按子串识别 token");
+/// assert!(!is_sensitive_header_name("content-type"), "普通头不脱敏");
+/// ```
 #[must_use]
 pub fn is_sensitive_header_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
