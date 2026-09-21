@@ -1,0 +1,70 @@
+[package]
+name = "transportx"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "驱动无关的 HTTP/WebSocket 传输边界：TLS 模式、客户端连接池与代理配置，附 reqwest / tungstenite 默认驱动"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bytechainx/transportx"
+homepage = "https://github.com/bytechainx/transportx"
+documentation = "https://docs.rs/transportx"
+readme = "README.md"
+keywords = ["http", "websocket", "tls", "reqwest", "transport"]
+categories = ["network-programming", "web-programming::http-client", "asynchronous"]
+include = [
+    "src/**/*",
+    "tests/**/*",
+    "benches/**/*",
+    "examples/**/*",
+    "docs/**/*",
+    "README.md",
+    "LICENSE-*",
+    "Cargo.toml",
+]
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+futures-util = "0.3"
+httpdate = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+thiserror = "2"
+tokio = { version = "1", features = ["net", "rt-multi-thread", "macros"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
+
+[dev-dependencies]
+bytes = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "io-util",
+    "time",
+    "sync",
+] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
+
+[features]
+default = []
+
+[[bench]]
+name = "hot_path"
+harness = false
+
+[lints.rust]
+private_interfaces = "deny"
+private_bounds = "deny"
+unused_must_use = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
