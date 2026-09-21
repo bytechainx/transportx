@@ -7,6 +7,7 @@
         clippy::unreachable
     )
 )]
+#![forbid(unsafe_code)]
 #![deny(missing_docs)]
 #![deny(unreachable_pub)]
 
