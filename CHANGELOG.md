@@ -12,7 +12,7 @@
 
 ### 新增
 
-- 从 `xhyper.rs` 抽取为独立可发布 crate，移除对内部 crate `kernel` 的依赖。
+- 从 `xhyper.rs` 抽取为独立 crate，移除对内部 crate `kernel` 的依赖。
 - `HttpDriver` 边界：带 method / headers / body 的 typed HTTP 请求，响应按 chunk 流式累计，
   未知长度越界时立即中止。
 - `WsConnector` / `WsConnection`：帧级 WebSocket 生命周期边界；tungstenite 在解码与聚合前
