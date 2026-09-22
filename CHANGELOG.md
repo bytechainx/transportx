@@ -8,11 +8,24 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-22
+
 ### 新增
 
 - 特性 002：`tests/tdd_contracts.rs`（覆盖公开接口契约全部 10 个入口的行为契约 +
   TDD-PROBE 变异探测表）、`tests/sdd_spec.rs`（`docs/标准.md` 全部 3 个 `##` 章节的
   可执行断言）、`tests/aidd_boundary.rs`（8 条经复核的 AI 生成对抗 / 边界用例）。
+
+### 变更
+
+- **内部结构改写（公开 API 与可观察契约均不变）**：按 `docs/module-rules.md` §5.5 的手法，
+  把两个默认驱动从 `src/lib.rs` 下沉为独立子模块 —— reqwest 驱动 → `src/http.rs`、
+  tungstenite 驱动 → `src/ws.rs`。门面 `src/lib.rs` 保留边界类型 / trait / 常量 / 内存 Mock
+  与**原有内联测试**；`ReqwestHttpDriver` / `TungsteniteWsConnector` 经 crate 根 `pub use`
+  导出，公开路径与 `Debug` 输出均不变。`src/lib.rs` 生产段由 **787 → 403** 行。
+  动机：`module-rules` 已是元仓库必需检查，而它审计各仓默认分支，故 `lib.rs` 生产段距
+  `MR-STRUCT-007` 的 800 行 ERROR 阈值只剩 13 行时，任一仓的任意改动都可能卡住元仓库的
+  全部 PR。属纯搬移，全部 97 项测试与 doctest 结果不变。
 
 ## [0.1.0] - 2026-09-21
 
