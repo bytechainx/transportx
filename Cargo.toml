@@ -1,6 +1,6 @@
 [package]
 name = "transportx"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.77"
 description = "驱动无关的 HTTP/WebSocket 传输边界：TLS 模式、客户端连接池与代理配置，附 reqwest / tungstenite 默认驱动"

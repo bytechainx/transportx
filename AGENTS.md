@@ -18,8 +18,10 @@
 ```text
 src/
 ├── lib.rs  # 传输边界核心：TransportError / HttpRequest / HttpResponse DTO、
-│           # HttpDriver / WsConnector / WsConnection trait、
-│           # 默认驱动 ReqwestHttpDriver / TungsteniteWsConnector、测试用 MockHttpTransport
+│           # HttpDriver / WsConnector / WsConnection trait、默认上限常量、
+│           # 测试用 MockHttpTransport
+├── http.rs # reqwest 默认驱动：ReqwestHttpDriver 与其错误映射
+├── ws.rs   # tungstenite 默认驱动：TungsteniteWsConnector 与帧级实现
 ├── pool.rs # HttpClientPool / SharedHttpClientPool / HttpClientLease / PoolConfig
 ├── proxy.rs# ProxyConfig / build_reqwest_proxy（Debug 脱敏）
 └── tls.rs  # TlsConfig / TlsMode
