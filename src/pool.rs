@@ -232,10 +232,15 @@ impl<T> HttpClientPool<T> {
 
     /// 兼容借出入口：优先空闲；否则若未达 `max_pool_size` 用 `factory` 创建。
     ///
-    /// 达到上限时立即返回错误，不等待许可；调用方必须用 [`Self::return_client`]
+    /// 达到上限时立即返回 [`TransportError::PoolExhausted`]（临时性错误，可退避后
+    /// 重试），不等待许可；调用方必须用 [`Self::return_client`]
     /// 准确归还。新代码推荐 [`Self::checkout_lease_with`]。
     ///
     /// `factory` 返回错误或 panic 展开时都会回滚 `checked_out`，避免槽位永久泄漏。
+    ///
+    /// # Errors
+    ///
+    /// 池已耗尽时返回 [`TransportError::PoolExhausted`]；factory 失败时透传其错误。
     pub fn checkout_with<F>(&self, factory: F) -> Result<T, TransportError>
     where
         F: FnOnce() -> Result<T, TransportError>,
@@ -256,10 +261,11 @@ impl<T> HttpClientPool<T> {
             rollback.disarm();
             Ok(item)
         } else {
-            Err(TransportError::ProtocolViolation(format!(
-                "HTTP 客户端池已耗尽（上限 {}）",
-                self.config.max_pool_size
-            )))
+            // 池耗尽是资源临时不可用，不是协议违规：返回专用变体，
+            // 让上层经 is_retryable() 做出正确的重试 / 熔断决策。
+            Err(TransportError::PoolExhausted {
+                limit: self.config.max_pool_size,
+            })
         }
     }
 
@@ -267,7 +273,8 @@ impl<T> HttpClientPool<T> {
     ///
     /// # Errors
     ///
-    /// 池已耗尽或 factory 失败时返回 [`TransportError`]。
+    /// 池已耗尽时返回 [`TransportError::PoolExhausted`]（临时性、可重试），
+    /// factory 失败时透传其错误。
     pub fn checkout_lease_with<F>(
         &self,
         factory: F,

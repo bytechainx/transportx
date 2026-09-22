@@ -63,3 +63,42 @@ fn taking_item_releases_permit_exactly_once_without_returning_idle() {
         .expect("许可仅释放一次");
     assert_eq!(next.get(), Some(&6));
 }
+
+/// 回归（对抗审查 Top10 #3）：池耗尽是资源临时不可用，必须返回专用的
+/// `PoolExhausted` 变体而非 `ProtocolViolation`，且被分类为可重试；
+/// 上层重试 / 熔断不得把临时状况当永久失败处理。
+#[test]
+fn pool_exhaustion_returns_retryable_pool_exhausted_not_protocol_violation() {
+    let pool = HttpClientPool::try_new(PoolConfig::new(1, 1)).expect("池配置有效");
+    let _held = pool.checkout_lease_with(|| Ok(7_u32)).expect("可借出");
+
+    let error = pool
+        .checkout_with(|| Ok(8_u32))
+        .expect_err("池耗尽必须立即失败");
+    assert!(
+        matches!(error, TransportError::PoolExhausted { limit: 1 }),
+        "池耗尽必须返回 PoolExhausted 专用变体并携带上限，实际：{error:?}"
+    );
+    assert!(
+        !matches!(error, TransportError::ProtocolViolation(_)),
+        "池耗尽不得再误分类为协议违规永久错误"
+    );
+    assert!(error.is_retryable(), "池耗尽必须归类为可重试的临时状况");
+    assert!(
+        error.to_string().contains('1'),
+        "错误文案应包含上限上下文：{error}"
+    );
+}
+
+/// 归还后许可恢复：耗尽错误确实是临时状况（退避后可再次借出）。
+#[test]
+fn pool_recovers_after_exhaustion_confirming_transient_semantics() {
+    let pool = HttpClientPool::try_new(PoolConfig::new(1, 1)).expect("池配置有效");
+    let held = pool.checkout_lease_with(|| Ok(1_u32)).expect("可借出");
+    assert!(pool.checkout_with(|| Ok(2_u32)).is_err());
+    drop(held); // 归还对象与许可
+    let retry = pool
+        .checkout_lease_with(|| Ok(3_u32))
+        .expect("归还后重试必须成功（临时状况语义）");
+    assert_eq!(retry.get(), Some(&1));
+}

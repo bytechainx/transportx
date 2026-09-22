@@ -6,7 +6,29 @@
 本仓库代码自 `xhyper.rs` 的 `crates/infra/transport` 抽取而来（抽取时点为 `0.1.6`）。
 该工程内的版本线不在本文件中延续，本仓库从 `0.1.0` 重新起算。
 
-## [Unreleased]
+## [0.2.0] - 2026-09-23
+
+### 新增
+
+- `TransportError::PoolExhausted { limit }` 专用变体：连接池耗尽时返回语义明确的
+  资源临时不可用错误（可退避后重试），文案携带池上限上下文。
+- `TransportError::is_retryable()`：统一的可重试 / 永久错误分类入口，供上层重试与
+  熔断策略决策；临时状况类（超时、连接关闭、限流、池耗尽、I/O）返回 `true`，
+  fail-closed 永久类（载荷过大、协议违规）返回 `false`。
+
+### 修复
+
+- 池耗尽此前被误分类为 `ProtocolViolation`（协议违规类永久错误），误导上层把
+  资源临时不可用当永久失败处理（对抗审查 Top10 #3）。
+
+### 破坏性变更
+
+- `TransportError` 增加 `#[non_exhaustive]`：外部 crate 对该枚举的穷尽 `match`
+  需补兜底臂。迁移：在 match 末尾加 `_ => …` 分支，或改用 `is_retryable()` 分类。
+- `HttpClientPool::checkout_with` / `checkout_lease_with` 在池耗尽时返回
+  `PoolExhausted` 而非 `ProtocolViolation`。迁移：原先依赖 `ProtocolViolation`
+  识别池耗尽的调用方改为匹配 `PoolExhausted`（池配置校验错误仍为
+  `ProtocolViolation`，不受影响）。
 
 ## [0.1.1] - 2026-09-22
 

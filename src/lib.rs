@@ -82,8 +82,12 @@ pub use ws::TungsteniteWsConnector;
 // Errors
 // ---------------------------------------------------------------------------
 
-/// Transport failures retain enough semantics for reconnect policy decisions.
+/// 传输层失败错误；保留足够语义供重连 / 重试策略决策。
+///
+/// 标记 `#[non_exhaustive]`：随传输场景演进可能新增变体，外部 crate 的 match
+/// 必须保留兜底臂；重试 / 熔断决策优先使用 [`Self::is_retryable`] 而非穷举变体。
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TransportError {
     /// TCP / TLS 握手超时。
     #[error("connect timeout")]
@@ -103,6 +107,15 @@ pub enum TransportError {
         /// 建议等待时长（来自 delay-seconds 或相对当前时间的 HTTP-date）。
         retry_after: Option<Duration>,
     },
+    /// 连接池耗尽：资源临时不可用（可重试），不是协议违规。
+    ///
+    /// 调用方应退避后重试（参考 [`TransportError::is_retryable`]），
+    /// 不得将其当作永久失败处理。
+    #[error("连接池已耗尽（上限 {limit}）：资源临时不可用，可退避后重试")]
+    PoolExhausted {
+        /// 池的最大对象数上限。
+        limit: usize,
+    },
     /// 请求/响应/帧超过资源上限（fail-closed）。
     #[error("载荷过大: {kind} 上限 {limit} 字节，实际 {got} 字节")]
     PayloadTooLarge {
@@ -119,6 +132,29 @@ pub enum TransportError {
     /// 底层 I/O 或客户端构建失败。
     #[error("I/O error: {0}")]
     Io(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl TransportError {
+    /// 判断错误是否为可重试的临时性失败，供上层重试 / 熔断策略决策。
+    ///
+    /// 分类语义：
+    /// - **可重试**：连接 / 读超时、连接关闭、限流、池耗尽、底层 I/O 错误
+    ///   （网络或资源的临时状况，退避后重试可能成功）
+    /// - **不可重试**：载荷过大、协议违规
+    ///   （fail-closed 永久错误，同样输入重试必然再次失败）
+    #[must_use]
+    pub const fn is_retryable(&self) -> bool {
+        // 定义 crate 内穷尽 match：未来新增变体时编译器强制显式做出可重试分类决策。
+        match self {
+            Self::ConnectTimeout
+            | Self::ReadTimeout
+            | Self::ConnectionClosed { .. }
+            | Self::RateLimited { .. }
+            | Self::PoolExhausted { .. }
+            | Self::Io(_) => true,
+            Self::PayloadTooLarge { .. } | Self::ProtocolViolation(_) => false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
