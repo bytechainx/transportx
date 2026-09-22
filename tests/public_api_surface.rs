@@ -79,3 +79,32 @@ fn drivers_construct() {
     let ws = TungsteniteWsConnector::new();
     let _ = format!("{ws:?}");
 }
+
+/// 对抗审查 Top10 #3 修复面：`PoolExhausted` 变体的 Display 与
+/// `is_retryable()` 可重试 / 永久错误分类契约。
+#[test]
+fn pool_exhausted_display_and_retryable_classification() {
+    // 新变体 Display 非空且携带上限上下文。
+    let exhausted = TransportError::PoolExhausted { limit: 8 };
+    let text = exhausted.to_string();
+    assert!(!text.is_empty());
+    assert!(text.contains('8'), "文案应包含池上限：{text}");
+    assert!(exhausted.is_retryable(), "池耗尽必须分类为可重试");
+
+    // 临时状况类：可重试。
+    assert!(TransportError::ConnectTimeout.is_retryable());
+    assert!(TransportError::ReadTimeout.is_retryable());
+    assert!(TransportError::ConnectionClosed { clean: true }.is_retryable());
+    assert!(TransportError::ConnectionClosed { clean: false }.is_retryable());
+    assert!(TransportError::RateLimited { retry_after: None }.is_retryable());
+    assert!(TransportError::Io(Box::new(std::io::Error::other("io"))).is_retryable());
+
+    // 永久错误类（fail-closed）：不可重试。
+    assert!(!TransportError::PayloadTooLarge {
+        kind: "response_body",
+        limit: 1,
+        got: 2
+    }
+    .is_retryable());
+    assert!(!TransportError::ProtocolViolation("x".into()).is_retryable());
+}
