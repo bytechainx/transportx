@@ -51,7 +51,7 @@ cargo package --no-verify --allow-dirty
 ## 开发约定
 
 - 注释、文档、错误消息使用**简体中文**；标识符保持英文。
-- MSRV 为 Rust 1.77、edition 2021；不得使用高于该下界的语言特性或 std API。
+- MSRV 为 Rust 1.88、edition 2021；不得使用高于该下界的语言特性或 std API。
 - 错误模型：`TransportError`（thiserror 风格枚举）；
   禁止公共 API 返回 `String` / `anyhow::Error`。
 - 不在库代码里裸 `unwrap()`（`[lints.clippy]` 已 `deny` `unwrap_used` / `expect_used` / `panic`）。
